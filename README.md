@@ -169,7 +169,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 **Jakku Harshavardhan**
 
 * GitHub: [Harshavardhanjakku](https://github.com/Harshavardhanjakku)
-* Email: [your.email@example.com](mailto:jakkuharshavardhan2004@gmail.com)
+* Email: [jakkuharshavardhan2004@gmail.com](mailto:jakkuharshavardhan2004@gmail.com)
 
 ---
 
