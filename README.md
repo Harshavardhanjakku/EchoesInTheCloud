@@ -1,7 +1,3 @@
-Absolutely! Here's a professional, clean, and well-structured README template tailored for your chat app project named **EchoesInTheCloud**. You can customize the placeholders as needed.
-
----
-
 # EchoesInTheCloud
 
 > Real-time, scalable chat application built with Node.js, Express, Socket.IO, and MongoDB — delivering seamless messaging across the cloud.
