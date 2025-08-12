@@ -87,7 +87,7 @@ export default function Chat() {
   return (
     <div className="chat-container">
       <header className="chat-header">
-        <h1>Next.js + Socket.IO Chat</h1>
+        <h1>My Chat App</h1>
         <div className={`status ${connected ? 'online' : 'offline'}`}>
           {connected ? 'Online' : 'Offline'}
         </div>
