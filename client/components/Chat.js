@@ -273,18 +273,18 @@ export default function Chat() {
         )}
 
         <form className="composer" onSubmit={sendMessage}>
-          <input
+          <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Write a message…  Press Enter to send, Shift+Enter for new line"
             onKeyDown={(e) => {
-              // allow multiline with Shift+Enter
-              if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage(e);
-              }
+                }
             }}
-          />
+            rows={1}
+            />
           <button type="submit">Send</button>
         </form>
 

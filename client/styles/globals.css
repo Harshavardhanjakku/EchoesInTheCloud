@@ -253,7 +253,7 @@ body {
   background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.04));
 }
 
-.composer input {
+.composer textarea {
   flex: 1;
   padding: 12px 14px;
   border-radius: 12px;
