@@ -3,11 +3,15 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
+const sanitizeHtml = require('sanitize-html');
 require('dotenv').config();
 
 const app = express();
+if (!process.env.CLIENT_ORIGIN) {
+  console.warn('⚠️ CLIENT_ORIGIN not set, defaulting to localhost');
+}
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || '*',
+  origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000',
   methods: ['GET', 'POST']
 }));
 app.use(express.json());
@@ -30,7 +34,7 @@ const Message = mongoose.model('Message', messageSchema);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_ORIGIN || '*',
+    origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000',
     methods: ['GET', 'POST']
   }
 });
@@ -51,22 +55,20 @@ io.on('connection', async (socket) => {
   }
 
   socket.on('set-username', (username) => {
-  const cleanName = username?.trim() || 'Anonymous';
-  onlineUsers.set(socket.id, cleanName);
-  io.emit('room-users', Array.from(onlineUsers.values()));
-});
-
-
+    const cleanName = sanitizeHtml(username?.trim() || 'Anonymous', { allowedTags: [] });
+    onlineUsers.set(socket.id, cleanName);
+    io.emit('room-users', Array.from(onlineUsers.values()));
+  });
 
   // Receive & save messages
   socket.on('message', async (msg) => {
     try {
-      const username = (msg.user || 'Anonymous').trim() || 'Anonymous';
+      const username = sanitizeHtml((msg.user || 'Anonymous').trim() || 'Anonymous', { allowedTags: [] });
       onlineUsers.set(socket.id, username);
 
       const doc = await Message.create({
         user: username,
-        text: msg.text || '',
+        text: sanitizeHtml(msg.text || '', { allowedTags: [] }),
         time: msg.time ? new Date(msg.time) : new Date()
       });
 
@@ -79,7 +81,7 @@ io.on('connection', async (socket) => {
 
   // Typing indicator
   socket.on('typing', (payload = {}) => {
-    const who = (payload.user || 'Someone').trim() || 'Someone';
+    const who = sanitizeHtml((payload.user || 'Someone').trim() || 'Someone', { allowedTags: [] });
     onlineUsers.set(socket.id, who);
     socket.broadcast.emit('typing', { user: who, at: Date.now() });
     io.emit('room-users', Array.from(onlineUsers.values()));
@@ -113,7 +115,7 @@ mongoose.connect(process.env.MONGO_URI)
     console.log('✅ MongoDB connected');
     server.listen(PORT, () => {
       console.log(`🚀 Server listening on port ${PORT}`);
-      console.log(`🔗 Allowed client origin: ${process.env.CLIENT_ORIGIN || '*'}`);
+      console.log(`🔗 Allowed client origin: ${process.env.CLIENT_ORIGIN || 'http://localhost:3000'}`);
     });
   })
   .catch(err => {

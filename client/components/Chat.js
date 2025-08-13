@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-
+import DOMPurify from 'dompurify'; // NEW: for sanitizing HTML output
+import throttle from 'lodash/throttle'; // NEW: for throttling typing events
+import { IoMdSend } from "react-icons/io";
 let socket = null;
 
 export default function Chat() {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState([]);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => localStorage.getItem('chatUsername') || ''); // NEW: Load from localStorage
   const [text, setText] = useState('');
 
   const scrollRef = useRef();
@@ -95,7 +97,7 @@ export default function Chat() {
         timers.set(who, t);
       });
 
-      // Room users handler (moved here to ensure socket exists)
+      // Room users handler
       socket.on('room-users', (users) => {
         console.log('[Chat] online users:', users);
         setRoomUsers(users);
@@ -148,14 +150,23 @@ export default function Chat() {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [isAtBottom]);
 
-  // Send typing updates
+  // NEW: Persist username to localStorage
+  useEffect(() => {
+    localStorage.setItem('chatUsername', name);
+  }, [name]);
+
+  // NEW: Throttle typing updates
+  const emitTyping = throttle((who) => {
+    socket?.emit('typing', { user: who });
+    console.log('[Chat] emit typing as', who);
+  }, 500);
+
   useEffect(() => {
     if (!socket || !socket.connected) return;
     if (text.trim().length === 0) return;
 
     const who = name?.trim() || 'Anonymous';
-    socket.emit?.('typing', { user: who });
-    console.log('[Chat] emit typing as', who);
+    emitTyping(who);
   }, [text, name]);
 
   // Update username live
@@ -283,7 +294,10 @@ export default function Chat() {
                       <strong>{username}</strong>
                       <span className="time">{shortTime(m.time)}</span>
                     </div>
-                    <div className="text">{m.text}</div>
+                    <div
+                      className="text"
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(m.text) }} // NEW: Sanitize output
+                    />
                   </article>
                 </div>
               );
@@ -318,7 +332,7 @@ export default function Chat() {
             }}
             rows={1}
           />
-          <button type="submit">Send</button>
+          <button type="submit"><IoMdSend size={22}/></button>
         </form>
       </div>
     </div>
