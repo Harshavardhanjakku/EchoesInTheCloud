@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { IoMdSend } from "react-icons/io5";
 
 let socket = null;
 
@@ -319,7 +318,8 @@ export default function Chat() {
             }}
             rows={1}
           />
-      <button type="submit"><IoMdSend size={24} /></button>        </form>
+          <button type="submit">Send</button>
+        </form>
       </div>
     </div>
   );
