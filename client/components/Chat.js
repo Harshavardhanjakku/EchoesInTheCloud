@@ -15,6 +15,21 @@ export default function Chat() {
 
   const [typingUsers, setTypingUsers] = useState(new Set());
   const typingTimersRef = useRef(new Map());
+  const [roomUsers, setRoomUsers] = useState([]);
+
+  // Listen for room-users updates
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('room-users', (users) => {
+      console.log('[Chat] online users:', users);
+      setRoomUsers(users);
+    });
+
+    return () => {
+      socket.off('room-users');
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -30,6 +45,8 @@ export default function Chat() {
         if (!mounted) return;
         setConnected(true);
         console.log('[Chat] connected. socket.id =', socket.id);
+        // Send initial username to server
+        socket.emit('set-username', name?.trim() || 'Anonymous');
       });
 
       socket.on('disconnect', (reason) => {
@@ -62,11 +79,10 @@ export default function Chat() {
         console.warn('[Chat] message-error:', payload);
       });
 
-      // --- Typing handler ---
+      // Typing handler
       socket.on('typing', (payload = {}) => {
         if (!mounted) return;
         const who = (payload.user || 'Someone').trim() || 'Someone';
-
         if (who === (name || 'Anonymous')) return;
 
         console.log(`[Chat] typing from ${who}`);
@@ -114,6 +130,7 @@ export default function Chat() {
     };
   }, []);
 
+  // Scroll handling
   useEffect(() => {
     if (!scrollRef.current) return;
     if (isAtBottom) {
@@ -139,6 +156,7 @@ export default function Chat() {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [isAtBottom]);
 
+  // Send typing updates
   useEffect(() => {
     if (!socket || !socket.connected) return;
     if (text.trim().length === 0) return;
@@ -147,6 +165,12 @@ export default function Chat() {
     socket.emit?.('typing', { user: who });
     console.log('[Chat] emit typing as', who);
   }, [text, name]);
+
+  // Update username live
+  useEffect(() => {
+    if (!socket) return;
+    socket.emit('set-username', name?.trim() || 'Anonymous');
+  }, [name]);
 
   function sendMessage(e) {
     e.preventDefault();
@@ -213,6 +237,14 @@ export default function Chat() {
                 placeholder="Type your name"
               />
             </label>
+            <div className="online-users">
+              <h3>Online Users ({roomUsers.length})</h3>
+              <ul>
+                {roomUsers.map((u, i) => (
+                  <li key={i}>{u}</li>
+                ))}
+              </ul>
+            </div>
             <div className="legend">
               <div className="legend-row">
                 <span className="dot me" /> You

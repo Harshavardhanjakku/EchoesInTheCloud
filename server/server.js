@@ -35,48 +35,65 @@ const io = new Server(server, {
   }
 });
 
-// --- Socket.IO events ---
+// Store connected users in memory
+let onlineUsers = new Map(); // socket.id -> username
+
 io.on('connection', async (socket) => {
   console.log('⚡ Client connected:', socket.id);
+  onlineUsers.set(socket.id, 'Anonymous');
 
+  // Send message history
   try {
     const history = await Message.find().sort({ time: 1 }).limit(500);
-    console.log(`📦 Sending ${history.length} messages to`, socket.id);
     socket.emit('message-history', history);
   } catch (err) {
     console.error('❌ Error fetching message history:', err);
   }
 
-  // Receive chat messages from a client
+  socket.on('set-username', (username) => {
+  const cleanName = username?.trim() || 'Anonymous';
+  onlineUsers.set(socket.id, cleanName);
+  io.emit('room-users', Array.from(onlineUsers.values()));
+});
+
+
+
+  // Receive & save messages
   socket.on('message', async (msg) => {
-    console.log('📥 message received from', socket.id, '->', msg);
     try {
+      const username = (msg.user || 'Anonymous').trim() || 'Anonymous';
+      onlineUsers.set(socket.id, username);
+
       const doc = await Message.create({
-        user: (msg.user || 'Anonymous').trim() || 'Anonymous',
-        text: (msg.text || '').toString(),
+        user: username,
+        text: msg.text || '',
         time: msg.time ? new Date(msg.time) : new Date()
       });
 
-      console.log('💾 message saved with _id:', doc._id?.toString());
-      io.emit('message', doc); // broadcast to everyone (including sender)
-      console.log('📤 message broadcasted to all clients');
+      io.emit('message', doc);
+      io.emit('room-users', Array.from(onlineUsers.values()));
     } catch (err) {
       console.error('❌ Error saving message:', err);
-      socket.emit('message-error', { error: 'Failed to save message' });
     }
   });
 
-  // --- Typing indicator handling ---
+  // Typing indicator
   socket.on('typing', (payload = {}) => {
-    const who = (payload.user || 'Someone').toString().trim() || 'Someone';
-    console.log(`⌨️  typing event from ${socket.id} (${who})`);
+    const who = (payload.user || 'Someone').trim() || 'Someone';
+    onlineUsers.set(socket.id, who);
     socket.broadcast.emit('typing', { user: who, at: Date.now() });
-    console.log(`🛰️  typing event broadcasted to others (not to ${who})`);
+    io.emit('room-users', Array.from(onlineUsers.values()));
   });
 
+  // On disconnect
   socket.on('disconnect', (reason) => {
     console.log('❌ Client disconnected:', socket.id, 'reason:', reason);
+    onlineUsers.delete(socket.id);
+    io.emit('room-users', Array.from(onlineUsers.values()));
   });
+
+  // Send current online list to the newly connected user
+  socket.emit('room-users', Array.from(onlineUsers.values()));
 });
 
 // --- REST endpoint ---
