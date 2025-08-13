@@ -1,7 +1,6 @@
-// client/components/Chat.js
 import { useEffect, useRef, useState } from 'react';
 
-let socket = null; // module-scoped to avoid re-creation across renders
+let socket = null;
 
 export default function Chat() {
   const [connected, setConnected] = useState(false);
@@ -11,16 +10,12 @@ export default function Chat() {
 
   const scrollRef = useRef();
 
-  // --- UI/UX states ---
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unseenCount, setUnseenCount] = useState(0);
 
-  // typing state: set of names currently typing (others only)
   const [typingUsers, setTypingUsers] = useState(new Set());
-  // map of username -> timeoutId so we can clear/restart per user
   const typingTimersRef = useRef(new Map());
 
-  // --- Setup Socket once ---
   useEffect(() => {
     let mounted = true;
 
@@ -47,7 +42,6 @@ export default function Chat() {
         if (!mounted) return;
         console.log('[Chat] message-history received. count =', history?.length || 0);
         setMessages(history || []);
-        // after history, keep view at bottom
         requestAnimationFrame(() => {
           if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -61,8 +55,6 @@ export default function Chat() {
         if (!mounted) return;
         console.log('[Chat] message event:', msg);
         setMessages((prev) => [...prev, msg]);
-
-        // new message badge if user is not at bottom
         if (!isAtBottom) setUnseenCount((c) => c + 1);
       });
 
@@ -70,46 +62,21 @@ export default function Chat() {
         console.warn('[Chat] message-error:', payload);
       });
 
-      // --- NEW: typing handler (others only) ---
+      // --- Typing handler ---
       socket.on('typing', (payload = {}) => {
         if (!mounted) return;
         const who = (payload.user || 'Someone').trim() || 'Someone';
 
-        // don't show yourself in typing list
-        if (who === (name || 'Anonymous')) {
-          // ignore self-echoing if any
-          return;
-        }
+        if (who === (name || 'Anonymous')) return;
 
         console.log(`[Chat] typing from ${who}`);
-socket.on('typing', (username) => {
-  if (username !== name) {
-    console.log(`[Chat] Received typing from ${username}`);
-    setTypingUsers((prev) => {
-      const updated = new Set(prev);
-      updated.add(username);
-      return updated;
-    });
 
-    clearTimeout(typingTimeoutRef.current[username]);
-    typingTimeoutRef.current[username] = setTimeout(() => {
-      setTypingUsers((prev) => {
-        const updated = new Set(prev);
-        updated.delete(username);
-        return updated;
-      });
-    }, 2000);
-  }
-});
-
-        // add to set
         setTypingUsers((prev) => {
           const next = new Set(prev);
           next.add(who);
           return next;
         });
 
-        // reset/extend their timer to clear after 2s
         const timers = typingTimersRef.current;
         if (timers.has(who)) {
           clearTimeout(timers.get(who));
@@ -142,13 +109,11 @@ socket.on('typing', (username) => {
       } finally {
         socket = null;
       }
-      // clear any outstanding typing timers
       for (const [, timer] of typingTimersRef.current) clearTimeout(timer);
       typingTimersRef.current.clear();
     };
-  }, []); // VERY IMPORTANT: empty deps -> do NOT recreate socket on scroll or other state changes
+  }, []);
 
-  // --- Auto-scroll if at bottom ---
   useEffect(() => {
     if (!scrollRef.current) return;
     if (isAtBottom) {
@@ -157,13 +122,12 @@ socket.on('typing', (username) => {
     }
   }, [messages, isAtBottom]);
 
-  // --- Track scroll position ---
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const handleScroll = () => {
-      const threshold = 60; // px tolerance from bottom
+      const threshold = 60;
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
       if (atBottom !== isAtBottom) {
         setIsAtBottom(atBottom);
@@ -175,17 +139,13 @@ socket.on('typing', (username) => {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [isAtBottom]);
 
-  // --- Emit typing on text changes (debounced by user speed & server clears after 2s) ---
   useEffect(() => {
     if (!socket || !socket.connected) return;
     if (text.trim().length === 0) return;
 
     const who = name?.trim() || 'Anonymous';
-    // fire-and-forget lightweight typing ping
     socket.emit?.('typing', { user: who });
     console.log('[Chat] emit typing as', who);
-
-    // We intentionally do NOT add ourselves to typingUsers, because UI must show others only.
   }, [text, name]);
 
   function sendMessage(e) {
@@ -204,14 +164,11 @@ socket.on('typing', (username) => {
       socket.emit('message', msg);
       console.log('[Chat] message emitted to server');
     } else {
-      // offline fallback: show locally so user sees it; will not sync
       console.warn('[Chat] socket not connected, appending message locally (fallback)');
       setMessages((prev) => [...prev, { ...msg, _id: `local-${Date.now()}` }]);
     }
 
     setText('');
-
-    // keep view at bottom
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -219,7 +176,6 @@ socket.on('typing', (username) => {
     });
   }
 
-  // helper — initials avatar
   const initials = (str) =>
     (str || 'A')
       .split(' ')
@@ -228,7 +184,6 @@ socket.on('typing', (username) => {
       .slice(0, 2)
       .toUpperCase();
 
-  // helper — pretty time (HH:MM)
   const shortTime = (iso) => {
     try {
       return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -239,9 +194,7 @@ socket.on('typing', (username) => {
 
   return (
     <div className="chat-shell">
-      {/* Glassy backplate */}
       <div className="glass-bg" />
-
       <div className="chat-container">
         <header className="chat-header">
           <h1>My Chat App</h1>
@@ -260,7 +213,6 @@ socket.on('typing', (username) => {
                 placeholder="Type your name"
               />
             </label>
-
             <div className="legend">
               <div className="legend-row">
                 <span className="dot me" /> You
@@ -279,7 +231,6 @@ socket.on('typing', (username) => {
               </div>
             )}
 
-            {/* Typing indicator (others only) */}
             {typingUsers.size > 0 && (
               <div className="typing-bar">
                 <span className="typing-dots" aria-hidden>
@@ -303,7 +254,6 @@ socket.on('typing', (username) => {
                   <div className="avatar" aria-hidden>
                     {initials(username)}
                   </div>
-
                   <article className="message">
                     <div className="meta">
                       <strong>{username}</strong>
@@ -346,8 +296,6 @@ socket.on('typing', (username) => {
           />
           <button type="submit">Send</button>
         </form>
-
-        {/* small styles kept in globals.css */}
       </div>
     </div>
   );

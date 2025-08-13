@@ -1,4 +1,3 @@
-// server/server.js
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -67,19 +66,13 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // --- NEW: typing indicator handling ---
-  // Client emits: socket.emit('typing', { user: 'Alice' })
-  // We broadcast to others only; the typer never sees their own "is typing..."
+  // --- Typing indicator handling ---
   socket.on('typing', (payload = {}) => {
     const who = (payload.user || 'Someone').toString().trim() || 'Someone';
     console.log(`⌨️  typing event from ${socket.id} (${who})`);
     socket.broadcast.emit('typing', { user: who, at: Date.now() });
     console.log(`🛰️  typing event broadcasted to others (not to ${who})`);
   });
-socket.on('typing', (username) => {
-  console.log(`[Server] Typing event from: ${username}`);
-  socket.broadcast.emit('typing', username);
-});
 
   socket.on('disconnect', (reason) => {
     console.log('❌ Client disconnected:', socket.id, 'reason:', reason);
