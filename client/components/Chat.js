@@ -17,20 +17,6 @@ export default function Chat() {
   const typingTimersRef = useRef(new Map());
   const [roomUsers, setRoomUsers] = useState([]);
 
-  // Listen for room-users updates
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on('room-users', (users) => {
-      console.log('[Chat] online users:', users);
-      setRoomUsers(users);
-    });
-
-    return () => {
-      socket.off('room-users');
-    };
-  }, []);
-
   useEffect(() => {
     let mounted = true;
 
@@ -107,6 +93,12 @@ export default function Chat() {
           console.log(`[Chat] typing cleared for ${who}`);
         }, 2000);
         timers.set(who, t);
+      });
+
+      // Room users handler (moved here to ensure socket exists)
+      socket.on('room-users', (users) => {
+        console.log('[Chat] online users:', users);
+        setRoomUsers(users);
       });
     }
 
