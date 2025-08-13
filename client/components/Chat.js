@@ -1,74 +1,129 @@
 // client/components/Chat.js
 import { useEffect, useRef, useState } from 'react';
 
-let socket = null; // module-scoped so it won't be recreated across renders when possible
+let socket = null; // module-scoped to avoid re-creation across renders
 
 export default function Chat() {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState([]);
   const [name, setName] = useState('');
   const [text, setText] = useState('');
+
   const scrollRef = useRef();
 
-  // NEW: ui/ux states
+  // --- UI/UX states ---
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unseenCount, setUnseenCount] = useState(0);
-  const [typingUsers, setTypingUsers] = useState(new Set()); // set of names typing
-  const selfTypingTimeoutRef = useRef(null);
 
+  // typing state: set of names currently typing (others only)
+  const [typingUsers, setTypingUsers] = useState(new Set());
+  // map of username -> timeoutId so we can clear/restart per user
+  const typingTimersRef = useRef(new Map());
+
+  // --- Setup Socket once ---
   useEffect(() => {
     let mounted = true;
 
     async function setupSocket() {
-      // dynamic import so it only runs on the client
       const { io } = await import('socket.io-client');
-
       const SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 
-      // create socket
-      socket = io(SERVER_URL, {
-        transports: ['websocket', 'polling']
-      });
+      console.log('[Chat] Initializing socket to', SERVER_URL);
+      socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
 
       socket.on('connect', () => {
         if (!mounted) return;
         setConnected(true);
-        console.log('connected', socket.id);
+        console.log('[Chat] connected. socket.id =', socket.id);
       });
 
-      socket.on('disconnect', () => {
+      socket.on('disconnect', (reason) => {
+        if (!mounted) return;
         setConnected(false);
+        console.log('[Chat] disconnected. reason =', reason);
       });
 
       socket.on('message-history', (history) => {
         if (!mounted) return;
+        console.log('[Chat] message-history received. count =', history?.length || 0);
         setMessages(history || []);
+        // after history, keep view at bottom
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            setIsAtBottom(true);
+            setUnseenCount(0);
+          }
+        });
       });
 
       socket.on('message', (msg) => {
         if (!mounted) return;
+        console.log('[Chat] message event:', msg);
         setMessages((prev) => [...prev, msg]);
-        // NEW: if user is not at bottom, increment unseen counter
+
+        // new message badge if user is not at bottom
         if (!isAtBottom) setUnseenCount((c) => c + 1);
       });
 
-      // NEW: lightweight typing channel (no server change required; it just won’t show if server doesn’t emit)
-      socket.on?.('typing', (payload = {}) => {
+      socket.on('message-error', (payload) => {
+        console.warn('[Chat] message-error:', payload);
+      });
+
+      // --- NEW: typing handler (others only) ---
+      socket.on('typing', (payload = {}) => {
         if (!mounted) return;
-        const who = (payload.user || 'Someone').trim();
+        const who = (payload.user || 'Someone').trim() || 'Someone';
+
+        // don't show yourself in typing list
+        if (who === (name || 'Anonymous')) {
+          // ignore self-echoing if any
+          return;
+        }
+
+        console.log(`[Chat] typing from ${who}`);
+socket.on('typing', (username) => {
+  if (username !== name) {
+    console.log(`[Chat] Received typing from ${username}`);
+    setTypingUsers((prev) => {
+      const updated = new Set(prev);
+      updated.add(username);
+      return updated;
+    });
+
+    clearTimeout(typingTimeoutRef.current[username]);
+    typingTimeoutRef.current[username] = setTimeout(() => {
+      setTypingUsers((prev) => {
+        const updated = new Set(prev);
+        updated.delete(username);
+        return updated;
+      });
+    }, 2000);
+  }
+});
+
+        // add to set
         setTypingUsers((prev) => {
           const next = new Set(prev);
           next.add(who);
           return next;
         });
-        // auto-clear typing after 2s silence
-        setTimeout(() => {
+
+        // reset/extend their timer to clear after 2s
+        const timers = typingTimersRef.current;
+        if (timers.has(who)) {
+          clearTimeout(timers.get(who));
+        }
+        const t = setTimeout(() => {
           setTypingUsers((prev) => {
             const next = new Set(prev);
             next.delete(who);
             return next;
           });
+          timers.delete(who);
+          console.log(`[Chat] typing cleared for ${who}`);
         }, 2000);
+        timers.set(who, t);
       });
     }
 
@@ -76,14 +131,24 @@ export default function Chat() {
 
     return () => {
       mounted = false;
-      if (socket) {
-        socket.disconnect();
+      console.log('[Chat] cleanup: disconnecting socket');
+      try {
+        if (socket) {
+          socket.removeAllListeners?.();
+          socket.disconnect();
+        }
+      } catch (e) {
+        console.warn('[Chat] error during disconnect:', e);
+      } finally {
         socket = null;
       }
+      // clear any outstanding typing timers
+      for (const [, timer] of typingTimersRef.current) clearTimeout(timer);
+      typingTimersRef.current.clear();
     };
-  }, [isAtBottom]);
+  }, []); // VERY IMPORTANT: empty deps -> do NOT recreate socket on scroll or other state changes
 
-  // auto-scroll (only if user is near bottom)
+  // --- Auto-scroll if at bottom ---
   useEffect(() => {
     if (!scrollRef.current) return;
     if (isAtBottom) {
@@ -92,7 +157,7 @@ export default function Chat() {
     }
   }, [messages, isAtBottom]);
 
-  // NEW: track scroll position to decide autoscroll
+  // --- Track scroll position ---
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -100,35 +165,27 @@ export default function Chat() {
     const handleScroll = () => {
       const threshold = 60; // px tolerance from bottom
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-      setIsAtBottom(atBottom);
+      if (atBottom !== isAtBottom) {
+        setIsAtBottom(atBottom);
+      }
       if (atBottom) setUnseenCount(0);
     };
 
     el.addEventListener('scroll', handleScroll);
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [isAtBottom]);
 
-  // NEW: emit typing when text changes, debounced
+  // --- Emit typing on text changes (debounced by user speed & server clears after 2s) ---
   useEffect(() => {
     if (!socket || !socket.connected) return;
-    if (selfTypingTimeoutRef.current) clearTimeout(selfTypingTimeoutRef.current);
+    if (text.trim().length === 0) return;
 
-    if (text.trim().length > 0) {
-      socket.emit?.('typing', { user: name || 'Anonymous' });
-      // also add “self” locally (if server doesn’t echo)
-      setTypingUsers((prev) => {
-        const next = new Set(prev);
-        next.add(name || 'You');
-        return next;
-      });
-      selfTypingTimeoutRef.current = setTimeout(() => {
-        setTypingUsers((prev) => {
-          const next = new Set(prev);
-          next.delete(name || 'You');
-          return next;
-        });
-      }, 1200);
-    }
+    const who = name?.trim() || 'Anonymous';
+    // fire-and-forget lightweight typing ping
+    socket.emit?.('typing', { user: who });
+    console.log('[Chat] emit typing as', who);
+
+    // We intentionally do NOT add ourselves to typingUsers, because UI must show others only.
   }, [text, name]);
 
   function sendMessage(e) {
@@ -136,21 +193,25 @@ export default function Chat() {
     if (!text.trim()) return;
 
     const msg = {
-      user: name || 'Anonymous',
+      user: name?.trim() || 'Anonymous',
       text: text.trim(),
       time: new Date().toISOString()
     };
 
-    // emit to server
+    console.log('[Chat] sending message:', msg);
+
     if (socket && socket.connected) {
       socket.emit('message', msg);
+      console.log('[Chat] message emitted to server');
     } else {
-      // fallback: add locally
-      setMessages((prev) => [...prev, { ...msg, id: Date.now() }]);
+      // offline fallback: show locally so user sees it; will not sync
+      console.warn('[Chat] socket not connected, appending message locally (fallback)');
+      setMessages((prev) => [...prev, { ...msg, _id: `local-${Date.now()}` }]);
     }
 
     setText('');
-    // scroll to bottom after send
+
+    // keep view at bottom
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -158,7 +219,7 @@ export default function Chat() {
     });
   }
 
-  // NEW: helper — initials avatar
+  // helper — initials avatar
   const initials = (str) =>
     (str || 'A')
       .split(' ')
@@ -167,7 +228,7 @@ export default function Chat() {
       .slice(0, 2)
       .toUpperCase();
 
-  // NEW: pretty time (HH:MM)
+  // helper — pretty time (HH:MM)
   const shortTime = (iso) => {
     try {
       return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -193,10 +254,13 @@ export default function Chat() {
           <aside className="chat-side">
             <label>
               <div className="label">Your name</div>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Type your name" />
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Type your name"
+              />
             </label>
 
-            {/* NEW: small legend */}
             <div className="legend">
               <div className="legend-row">
                 <span className="dot me" /> You
@@ -208,7 +272,6 @@ export default function Chat() {
           </aside>
 
           <section className="chat-box" ref={scrollRef}>
-            {/* NEW: empty state */}
             {messages.length === 0 && (
               <div className="empty-state">
                 <div className="empty-bubble shimmer">No messages yet</div>
@@ -216,7 +279,7 @@ export default function Chat() {
               </div>
             )}
 
-            {/* NEW: typing indicator bar */}
+            {/* Typing indicator (others only) */}
             {typingUsers.size > 0 && (
               <div className="typing-bar">
                 <span className="typing-dots" aria-hidden>
@@ -232,21 +295,18 @@ export default function Chat() {
             )}
 
             {messages.map((m) => {
-              const mine = (m.user || 'Anonymous') === (name || 'Anonymous');
+              const username = m.user || 'Anonymous';
+              const mine = username === (name?.trim() || 'Anonymous');
+              const key = m._id || m.id || m.time || `${username}-${Math.random()}`;
               return (
-                <div
-                  key={m.id || m.time}
-                  className={`msg-row ${mine ? 'mine' : 'theirs'}`}
-                >
-                  {/* avatar bubble */}
+                <div key={key} className={`msg-row ${mine ? 'mine' : 'theirs'}`}>
                   <div className="avatar" aria-hidden>
-                    {initials(m.user)}
+                    {initials(username)}
                   </div>
 
-                  {/* original markup preserved inside */}
                   <article className="message">
                     <div className="meta">
-                      <strong>{m.user}</strong>
+                      <strong>{username}</strong>
                       <span className="time">{shortTime(m.time)}</span>
                     </div>
                     <div className="text">{m.text}</div>
@@ -257,7 +317,6 @@ export default function Chat() {
           </section>
         </div>
 
-        {/* new messages pill when scrolled up */}
         {unseenCount > 0 && !isAtBottom && (
           <button
             className="new-msg-pill"
@@ -278,17 +337,17 @@ export default function Chat() {
             onChange={(e) => setText(e.target.value)}
             placeholder="Write a message…  Press Enter to send, Shift+Enter for new line"
             onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage(e);
-                }
+              }
             }}
             rows={1}
-            />
+          />
           <button type="submit">Send</button>
         </form>
 
-        {/* small styles kept in globals.css - see file */}
+        {/* small styles kept in globals.css */}
       </div>
     </div>
   );
