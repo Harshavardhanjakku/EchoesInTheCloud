@@ -23,7 +23,11 @@ const messageSchema = new mongoose.Schema(
   {
     user: { type: String, required: true },
     text: { type: String, required: true },
-    time: { type: Date, default: Date.now }
+    time: { type: Date, default: Date.now },
+    deleted: { type: Boolean, default: false }, // NEW: For message deletion
+    edited: { type: Boolean, default: false }, // NEW: For message editing
+    editTime: { type: Date }, // NEW: Track last edit time for 5-minute limit
+    readBy: [{ type: String }] // NEW: For read receipts
   },
   { versionKey: false }
 );
@@ -48,7 +52,7 @@ io.on('connection', async (socket) => {
 
   // Send message history
   try {
-    const history = await Message.find().sort({ time: 1 }).limit(500);
+    const history = await Message.find({ deleted: false }).sort({ time: 1 }).limit(500); // Filter out deleted messages
     socket.emit('message-history', history);
   } catch (err) {
     console.error('❌ Error fetching message history:', err);
@@ -79,6 +83,62 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // NEW: Handle message deletion
+  socket.on('delete-message', async (messageId) => {
+    try {
+      const username = onlineUsers.get(socket.id) || 'Anonymous';
+      const message = await Message.findOne({ _id: messageId });
+      if (message && message.user === username) {
+        await Message.updateOne({ _id: messageId }, { deleted: true });
+        io.emit('delete-message', messageId);
+      }
+    } catch (err) {
+      console.error('❌ Error deleting message:', err);
+    }
+  });
+
+  // NEW: Handle message editing
+  socket.on('edit-message', async (data) => {
+    try {
+      const { messageId, newText } = data;
+      const username = onlineUsers.get(socket.id) || 'Anonymous';
+      const message = await Message.findOne({ _id: messageId });
+      if (message && message.user === username) {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        if (!message.editTime || message.editTime < fiveMinutesAgo) {
+          await Message.updateOne(
+            { _id: messageId },
+            {
+              text: sanitizeHtml(newText, { allowedTags: [] }),
+              edited: true,
+              editTime: new Date()
+            }
+          );
+          io.emit('edit-message', { messageId, newText, editTime: new Date() });
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error editing message:', err);
+    }
+  });
+
+  // NEW: Handle read receipts
+  socket.on('message-read', async (messageId) => {
+    try {
+      const username = onlineUsers.get(socket.id) || 'Anonymous';
+      const message = await Message.findOne({ _id: messageId });
+      if (message && !message.readBy.includes(username)) {
+        await Message.updateOne(
+          { _id: messageId },
+          { $addToSet: { readBy: username } }
+        );
+        io.emit('message-read', { messageId, username });
+      }
+    } catch (err) {
+      console.error('❌ Error updating read receipt:', err);
+    }
+  });
+
   // Typing indicator
   socket.on('typing', (payload = {}) => {
     const who = sanitizeHtml((payload.user || 'Someone').trim() || 'Someone', { allowedTags: [] });
@@ -101,7 +161,7 @@ io.on('connection', async (socket) => {
 // --- REST endpoint ---
 app.get('/messages', async (req, res) => {
   try {
-    const messages = await Message.find().sort({ time: 1 }).limit(500);
+    const messages = await Message.find({ deleted: false }).sort({ time: 1 }).limit(500);
     res.json(messages);
   } catch (err) {
     console.error('❌ /messages error:', err);
